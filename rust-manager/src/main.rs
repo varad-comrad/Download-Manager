@@ -1,5 +1,4 @@
-use std::process::Command;
-use std::io::Result;
+use std::{io::{Result, Read, Write}, fs::File, str::FromStr, result, collections::HashMap};
 extern crate clap;
 use clap::{Arg, App, ArgMatches};
 
@@ -7,16 +6,23 @@ extern crate serde;
 extern crate serde_json;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Manager{
-    watchlist: String,
-    patterns: Vec<(String, String)>
+    watchlist: Vec<String>,
+    patterns: HashMap<String, String>
+}
+
+impl FromStr for Manager{
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
+        serde_json::from_str(s).map_err(serde_json::Error::from)
+    }
+
+    type Err = serde_json::Error;
 }
 
 fn parse_args() -> ArgMatches<'static>{
     App::new("rust-manager")
         .version("0.1.0")
-        .author("Siddharth Dushantha <")
         .arg(
             Arg::with_name("create-pattern")
                 .short("c")
@@ -36,7 +42,6 @@ fn parse_args() -> ArgMatches<'static>{
                 .help("Delete a pattern")
                 .takes_value(true)
                 .multiple(true)
-                .number_of_values(2)
                 .required(false)
         )
         .arg(
@@ -47,7 +52,6 @@ fn parse_args() -> ArgMatches<'static>{
                 .help("Add a directory to watchlist")
                 .takes_value(true)
                 .multiple(true)
-                .number_of_values(1)
                 .required(false)
         )
         .arg(
@@ -58,7 +62,6 @@ fn parse_args() -> ArgMatches<'static>{
                 .help("Delete a directory from watchlist")
                 .takes_value(true)
                 .multiple(true)
-                .number_of_values(1)
                 .required(false)
         )
         .arg(
@@ -72,24 +75,51 @@ fn parse_args() -> ArgMatches<'static>{
         .get_matches()
 }
 
-fn create_pattern() -> Vec<(String, String)>{
-    let mut patterns: Vec<(String, String)> = Vec::new();
-    patterns.push(("".to_string(), "".to_string()));
-    patterns
+fn read_config() -> Result<Manager>{
+    let mut file = File::open("downloadmanager.json")?;
+    let mut str_json = String::new();
+    let _ = file.read_to_string(&mut str_json);
+    let config: Manager = str_json.parse().unwrap();
+    Ok(config)
 }
 
-fn delete_pattern() -> Vec<(String, String)>{
-    let mut patterns: Vec<(String, String)> = Vec::new();
-    patterns.push(("".to_string(), "".to_string()));
-    patterns
+fn write_config(config: Manager) -> Result<()>{
+    let mut file = File::create("downloadmanager.json")?;
+    let str_json = serde_json::to_string(&config).unwrap();
+    let _ = file.write_all(str_json.as_bytes());
+    Ok(())
 }
 
-fn add_directory() -> String{
-    "".to_string()
+fn create_pattern(pattern: String, dir: String) -> Result<()>{
+    let mut config = read_config()?;
+    config.patterns.insert(pattern, dir);
+    write_config(config)
 }
 
-fn delete_directory() -> String{
-    "".to_string()
+fn delete_pattern(mut pattern:Vec<&str> ) -> Result<()>{
+    let mut config = read_config()?;
+    while let Some(last_element) = pattern.pop() {
+        config.patterns.remove(last_element);
+    }
+    write_config(config)
+}
+
+fn add_directory(mut dir: Vec<&str>) -> Result<()>{
+    let mut config = read_config()?;
+
+    while !dir.is_empty() {
+        config.watchlist.append(&mut vec![dir.pop().unwrap().to_owned()]);
+    }
+    write_config(config)
+}
+
+fn delete_directory(mut dir: Vec<&str>) -> Result<()>{
+    let mut config = read_config()?;
+    while let Some(last_element) = dir.pop() {
+        config.watchlist.retain(|x| *x != last_element);
+    }
+
+    write_config(config)
 }
 
 fn watchdog() -> String{
@@ -100,33 +130,42 @@ fn watchdog_loop() -> String{
     loop{
         // sleep(1000);
         watchdog();
-
     }
 }
 
 fn main() -> Result<()> {
-    // Create a Command to run an external command (e.g., "ls" with arguments)
     let matches = parse_args();
-    // match matches{
-    //     "create-pattern" => create_pattern(),
-    //     "delete-pattern" => delete_pattern(),
-    //     "add-directory" => add_directory(),
-    //     "delete-directory" => delete_directory(),
-    //     "loop" => watchdog_loop(),
-    //     _ => println!("Invalid command")
-    // }
-    let output = Command::new("ls")
-        .arg("-l")
-        .output()?; // Execute the command and capture its output
-
-    // Check if the command was successful
-    if output.status.success() {
-        // Convert the output bytes to a string
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        println!("Output:\n{}", stdout);
+    let aux = matches.is_present("loop") as i32
+     + matches.is_present("create-pattern") as i32
+     + matches.is_present("delete-pattern") as i32
+     + matches.is_present("add-directory") as i32
+     + matches.is_present("delete-directory") as i32;
+     
+     if aux > 1{
+         println!("Invalid command. Please use only one command at a time.");
+         return Ok(());
+        }
+        if matches.is_present("create-pattern"){
+            let values = matches.values_of("create-pattern").unwrap().to_owned();
+            let vec_vals = values.collect::<Vec<&str>>();
+            let _ = create_pattern(vec_vals[0].to_owned(), vec_vals[1].to_owned());
+        } else if matches.is_present("delete-pattern"){
+            let values = matches.values_of("delete-pattern").unwrap().to_owned();
+            let vec_vals = values.collect::<Vec<&str>>();
+            let _ = delete_pattern(vec_vals);
+        } else if matches.is_present("add-directory"){
+            let values = matches.values_of("add-directory").unwrap().to_owned();
+            let vec_vals = values.collect::<Vec<&str>>();
+            let _ = add_directory(vec_vals);
+    } else if matches.is_present("delete-directory"){
+            let values = matches.values_of("delete-directory").unwrap().to_owned();
+            let vec_vals = values.collect::<Vec<&str>>();
+            let _ = delete_directory(vec_vals);
+    } else if matches.is_present("loop"){
+        watchdog_loop();
     } else {
-        eprintln!("Error: Command failed with {:?}", output.status);
+        watchdog();
     }
-
+    
     Ok(())
 }

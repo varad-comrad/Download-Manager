@@ -1,4 +1,5 @@
-use std::{io::{Result, Read, Write}, fs::File, str::FromStr, result, collections::HashMap};
+use std::{io::{Result, Read, Write}, fs::{File, self}, str::FromStr, result, collections::HashMap, thread::sleep, time::Duration, process::Command};
+
 extern crate clap;
 use clap::{Arg, App, ArgMatches};
 
@@ -107,8 +108,8 @@ fn delete_pattern(mut pattern:Vec<&str> ) -> Result<()>{
 fn add_directory(mut dir: Vec<&str>) -> Result<()>{
     let mut config = read_config()?;
 
-    while !dir.is_empty() {
-        config.watchlist.append(&mut vec![dir.pop().unwrap().to_owned()]);
+    while let Some(last_element) = dir.pop() {
+        config.watchlist.append(&mut vec![last_element.to_owned()]);
     }
     write_config(config)
 }
@@ -122,14 +123,39 @@ fn delete_directory(mut dir: Vec<&str>) -> Result<()>{
     write_config(config)
 }
 
-fn watchdog() -> String{
-    "".to_string()
+fn whoami() -> Result<String>{
+    let user_command = Command::new("whoami").output()?;
+    let user = String::from_utf8_lossy(&user_command.stdout);
+    Ok(user.to_string().replace('\n', ""))
 }
 
-fn watchdog_loop() -> String{
+fn watchdog() -> Result<()>{
+    let Ok(manager) = read_config() else{
+        panic!("Error reading config file")
+    };
+    let user = whoami()?;
+    let home = "/home/".to_owned() + &user;
+    for watched_dir in manager.watchlist{
+        let directory = home.clone() + "/" + &watched_dir; 
+        let dir = fs::read_dir(directory)?;
+        for element in dir{
+            let path = element?.path();
+            let file_name = path.file_name().unwrap().to_str().unwrap().to_owned();
+            for (pattern, dir) in &manager.patterns{
+                if file_name.contains(pattern){
+                    let _ = fs::copy(&path, home.clone() + "/" + dir.clone().as_str() + "/" + &file_name);
+                    let _ = fs::remove_file(&path);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn watchdog_loop() -> Result<()>{
     loop{
-        // sleep(1000);
-        watchdog();
+        sleep(Duration::from_secs(5));
+        let _ = watchdog();
     }
 }
 
@@ -162,9 +188,9 @@ fn main() -> Result<()> {
             let vec_vals = values.collect::<Vec<&str>>();
             let _ = delete_directory(vec_vals);
     } else if matches.is_present("loop"){
-        watchdog_loop();
+        let _ = watchdog_loop();
     } else {
-        watchdog();
+        let _ = watchdog();
     }
     
     Ok(())

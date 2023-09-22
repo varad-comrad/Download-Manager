@@ -1,4 +1,4 @@
-use std::{io::{Result, Read, Write}, fs::{File, self}, str::FromStr, result, collections::HashMap, thread::sleep, time::Duration, process::Command};
+use std::{io::{Result, Read, Write}, fs::{File, self}, str::FromStr, result, collections::HashMap, thread::sleep, time::Duration, process::Command, env};
 
 extern crate clap;
 use clap::{Arg, App, ArgMatches};
@@ -77,7 +77,11 @@ fn parse_args() -> ArgMatches<'static>{
 }
 
 fn read_config() -> Result<Manager>{
-    let mut file = File::open("downloadmanager.json")?;
+    let mut path = env::current_dir()?;
+    if !path.ends_with("src"){
+        path = path.join("src");
+    }
+    let mut file = File::open(path.join("downloadmanager.json").to_string_lossy().to_string())?;
     let mut str_json = String::new();
     let _ = file.read_to_string(&mut str_json);
     let config: Manager = str_json.parse().unwrap();
@@ -85,7 +89,11 @@ fn read_config() -> Result<Manager>{
 }
 
 fn write_config(config: Manager) -> Result<()>{
-    let mut file = File::create("downloadmanager.json")?;
+    let mut path = env::current_dir()?;
+    if !path.ends_with("src"){
+        path = path.join("src");
+    }
+    let mut file = File::create(path.join("downloadmanager.json").to_string_lossy().to_string())?;
     let str_json = serde_json::to_string(&config).unwrap();
     let _ = file.write_all(str_json.as_bytes());
     Ok(())
